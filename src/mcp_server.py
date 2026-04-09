@@ -95,7 +95,10 @@ def search_component(file_path: str, pattern: str) -> str:
         pattern: Regex pattern to match against designator, value, library_reference, or description.
     """
     data = _get_parsed(file_path)
-    regex = re.compile(pattern, re.IGNORECASE)
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return f"Invalid regex pattern '{pattern}': {e}"
     
     matches = []
     for comp in data.get("components", []):
@@ -124,7 +127,10 @@ def get_net_connections(file_path: str, net_name: str) -> str:
     """
     data = _get_parsed(file_path)
     nets = data.get("nets", {})
-    regex = re.compile(net_name, re.IGNORECASE)
+    try:
+        regex = re.compile(net_name, re.IGNORECASE)
+    except re.error as e:
+        return f"Invalid regex pattern '{net_name}': {e}"
     
     matches = {}
     for name, pins in nets.items():

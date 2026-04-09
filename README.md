@@ -1,18 +1,17 @@
 # altium-schdoc-mcp
 
-Offline Altium `.SchDoc` parser — CLI tool + MCP server for AI-assisted hardware review.
+Read Altium Designer schematic files (`.SchDoc`) without Altium installed.
 
-Parses Altium Designer schematic documents (binary OLE2 format) without requiring Altium Designer installed. Extracts structured component, net, pin, and hierarchy data as JSON or Markdown.
+Extracts components, nets, pins, ports, and hierarchy into JSON or Markdown. Works as a command-line tool or as an [MCP server](https://modelcontextprotocol.io/) so VS Code Copilot / Claude can answer questions about your schematics.
 
-## Features
+## What problem does this solve?
 
-- **No Altium required** — pure offline parsing via `olefile`
-- **CLI tool** — `parse-schdoc` command for terminal usage
-- **MCP server** — 5 tools for VS Code Copilot / Claude Desktop integration
-- **JSON + Markdown output** — structured data for automation, readable summaries for AI reasoning
-- **Net resolution** — traces wire connectivity between pins, ports, net labels, and power ports
-- **Batch processing** — parse entire schematic directories in one command
-- **Zero config** — works on Python 3.10+ with a single dependency (`olefile`)
+Altium `.SchDoc` files are binary. You can't open them in a text editor, and you need an Altium license to view them. This tool reads the binary format directly and gives you the data in a usable form.
+
+## Requirements
+
+- Python 3.10 or newer
+- No Altium license required
 
 ## Installation
 
@@ -20,39 +19,65 @@ Parses Altium Designer schematic documents (binary OLE2 format) without requirin
 git clone https://github.com/brandons-cs/altium-schdoc-mcp.git
 cd altium-schdoc-mcp
 python -m venv .venv
-.venv\Scripts\activate      # Windows
+```
+
+Activate the virtual environment:
+
+```bash
+# Windows (PowerShell)
+.venv\Scripts\activate
+
+# Windows (cmd)
+.venv\Scripts\activate.bat
+
+# Linux / macOS
+source .venv/bin/activate
+```
+
+Install the tool:
+
+```bash
 pip install -e .
 ```
 
-For MCP server support:
+To also use the MCP server (for VS Code Copilot / Claude):
+
 ```bash
 pip install -e ".[mcp]"
 ```
 
 ## CLI Usage
 
+Parse a single file:
+
 ```bash
-# JSON to stdout
+# Print JSON to terminal
 parse-schdoc path/to/schematic.SchDoc
 
-# JSON to file
+# Save JSON to a file
 parse-schdoc path/to/schematic.SchDoc -o output.json
 
-# Markdown to stdout
+# Print Markdown to terminal
 parse-schdoc path/to/schematic.SchDoc --markdown
 
-# Markdown to file
+# Save Markdown to a file
 parse-schdoc path/to/schematic.SchDoc --markdown -o output.md
+```
 
-# Batch — process all SchDoc files in a directory
+Parse all `.SchDoc` files in a folder:
+
+```bash
 parse-schdoc --batch path/to/schematics/ --markdown -o path/to/output/
 ```
 
-## MCP Server
+## MCP Server (VS Code / Claude)
 
-### VS Code Setup
+The MCP server lets an AI assistant read your schematics on demand. You don't need to pre-parse anything — the assistant calls the tool when it needs the data.
 
-Add to `.vscode/mcp.json` in your project:
+### Setup
+
+Create a file called `.vscode/mcp.json` in your project:
+
 ```json
 {
     "servers": {
@@ -66,42 +91,45 @@ Add to `.vscode/mcp.json` in your project:
 }
 ```
 
-### Available MCP Tools
+Replace the `command` path with the actual path to your Python executable inside the `.venv`.
 
-| Tool | Description |
-|------|-------------|
-| `parse_schdoc_json` | Parse a SchDoc file → structured JSON |
-| `parse_schdoc_markdown` | Parse a SchDoc file → LLM-readable Markdown |
-| `list_schematics` | List all SchDoc files in a directory |
-| `search_component` | Search components by designator/value/description (regex) |
-| `get_net_connections` | Get all pins connected to a net (regex) |
+Reload VS Code after saving the file. The MCP server will appear in the Copilot tools list.
 
-### Example Copilot Queries
+### Available Tools
 
-With the MCP server running, you can ask Copilot:
-- "What components are on the DUT 1 IO schematic?"
-- "List all relay designators across all schematics"
-- "What pins are connected to the 24VDC net?"
-- "Show me the E-Stop safety chain components"
+| Tool | What it does |
+|------|--------------|
+| `parse_schdoc_json` | Returns all schematic data as JSON |
+| `parse_schdoc_markdown` | Returns a readable summary (tables, net lists) |
+| `list_schematics` | Lists `.SchDoc` files in a folder |
+| `search_component` | Finds components by designator, value, or description |
+| `get_net_connections` | Shows which pins are connected to a given net |
 
-## Output Format
+### Example questions you can ask Copilot
 
-### JSON Structure
+- "What components are on the E-Stop Safety schematic?"
+- "Which pins are connected to the 24VDC net?"
+- "List all relay designators in the DUT 1 IO schematic"
+- "What is the footprint for Rly301?"
+
+## What you get
+
+### JSON output
 
 ```json
 {
   "metadata": {
-    "filename": "Schematic.SchDoc",
+    "filename": "E-Stop Safety Section.SchDoc",
     "parser_version": "0.1.0"
   },
   "components": [
     {
-      "designator": "Rly301",
-      "library_reference": "WAGO - Relay, 857-304",
-      "description": "24V 1CO 6A Relay and Base",
+      "designator": "Rly202",
+      "library_reference": "WAGO - Relay, 788-312",
+      "description": "24V 2CO 8A Safety Relay and Base",
       "footprint": "",
-      "value": "857-304",
-      "parameters": {"Value": "857-304"},
+      "value": "788-312",
+      "parameters": {"Value": "788-312"},
       "pins": [
         {"designator": "A1", "name": "A1", "electrical": "Passive"},
         {"designator": "11", "name": "11", "electrical": "Passive"}
@@ -109,64 +137,64 @@ With the MCP server running, you can ask Copilot:
     }
   ],
   "nets": {
-    "E-Stop 1(1)": ["Rly201.A1", "WN?.0", "[Port]E-Stop 1(1)"],
-    "24VDC": ["PS1.4", "EC1.3"]
+    "E-Stop 1(1)": ["Rly201.A1", "[Port]E-Stop 1(1)"],
+    "E-Stop Rst (3)": ["Rly202.A2", "Rly202.14", "Rly203.14"]
   },
-  "pins": [...],
+  "pins": [],
   "ports": [
-    {"name": "24VDC (Ctrl)", "io_type": "Input", "x": 100.0, "y": 200.0}
+    {"name": "E-Stop 1(1)", "io_type": "Bidirectional", "x": 100.0, "y": 200.0}
   ],
-  "power_ports": [
-    {"name": "GND", "style": "PowerGround"}
-  ],
+  "power_ports": [],
   "hierarchy": []
 }
 ```
 
-### Markdown Summary
+### Markdown output
 
-The Markdown output includes:
-- **Component table** — designator, library ref, value, footprint, description
-- **Power rails** — named power nets with styles
-- **Ports** — inter-sheet connections with IO types
-- **Net list** — net name → connected pins (component.pin format)
-- **Pin map** — per-component pin details (designator, name, electrical type)
-- **Hierarchy** — sheet symbols with child sheet references
+The Markdown output contains:
 
-## How It Works
+- **Component table** with designator, library reference, value, footprint, and description
+- **Power rails** (GND, VCC, etc.) with their symbol styles
+- **Ports** (connections between schematic sheets)
+- **Net list** showing which component pins are connected to each net
+- **Pin map** listing every pin on every component
+- **Sheet hierarchy** if the schematic references child sheets
 
-1. Opens the `.SchDoc` file as an OLE2 compound document via `olefile`
-2. Reads the `FileHeader` stream — a sequence of length-prefixed, pipe-delimited key-value records
-3. Parses each record by its `RECORD` type ID (1=component, 2=pin, 17=power port, 25=net label, 27=wire, etc.)
-4. Resolves parent-child relationships via `OWNERINDEX` (0-based ordinal after the header record)
-5. Calculates pin hot-points (connection coordinates) from body position + pin length × rotation direction
-6. Builds a union-find connectivity graph from wire segments and junctions
-7. Maps pins → wires → net labels/ports to resolve per-net connectivity
+## How it works
 
-## Supported Record Types
+Altium `.SchDoc` files are OLE2 compound documents (the same container format as old `.doc` files). Inside, the `FileHeader` stream contains all schematic objects as length-prefixed, pipe-delimited key-value records.
 
-| ID | Type | Extracted Data |
-|----|------|----------------|
-| 1 | Component | designator, library ref, description, part count |
-| 2 | Pin | designator, name, electrical type, position |
-| 15 | Sheet Symbol | child sheet reference, dimensions |
-| 16 | Sheet Entry | name, IO type |
-| 17 | Power Port | net name, style |
-| 18 | Port | name, IO type (inter-sheet connection) |
-| 25 | Net Label | net name, position |
-| 27 | Wire | endpoint coordinates |
-| 29 | Junction | position (wire merge point) |
-| 31 | Sheet | sheet style, fonts |
-| 34 | Designator | reference designator text |
-| 41 | Parameter | name-value pairs (component values, comments) |
-| 45 | Implementation | footprint model name, type |
+Each record has a `RECORD` field that identifies its type:
+
+| Record ID | Type | What it contains |
+|-----------|------|------------------|
+| 1 | Component | Library reference, description, part count |
+| 2 | Pin | Name, designator, electrical type, position |
+| 15 | Sheet Symbol | Child sheet reference |
+| 16 | Sheet Entry | Port name and IO direction on a sheet symbol |
+| 17 | Power Port | Named power rail (GND, VCC, etc.) |
+| 18 | Port | Inter-sheet connection point |
+| 25 | Net Label | Named net at a specific position |
+| 27 | Wire | Coordinates of wire segments |
+| 29 | Junction | Wire merge point |
+| 34 | Designator | Component reference designator (R1, U3, etc.) |
+| 41 | Parameter | Component parameters (value, comment, etc.) |
+| 45 | Implementation | Footprint / model reference |
+
+Child records (pins, designators, parameters) link to their parent component via `OWNERINDEX`, which is the 0-based position of the parent in the record stream (counting from records[1]).
+
+Net connectivity is resolved by:
+1. Collecting all wire segments and building a union-find graph on their endpoints
+2. Calculating pin connection points from body position + pin length in the rotation direction
+3. Snapping pins, net labels, power ports, and ports to the nearest wire endpoint (within ±2 units)
+4. Grouping connected pins under the net name assigned by labels, power ports, or ports
 
 ## Limitations
 
-- **Net resolution is coordinate-based** — uses a tolerance of ±2 Altium units. Some connections may be missed on schematics with unusual pin lengths or non-standard placement.
-- **Cross-sheet hierarchy** — the parser works per-sheet. Full cross-sheet net resolution requires parsing the `.PrjPCB` project file (planned for v0.2).
-- **No rendering** — outputs data only, not visual schematic images.
-- **Tested with Altium Designer v20-v24** — older or newer format versions may have undocumented record types.
+- **Coordinate-based net resolution** — pins snap to wire endpoints within ±2 Altium units. Non-standard placements may cause missed connections.
+- **Per-sheet only** — each `.SchDoc` is parsed independently. Cross-sheet net tracing (via the `.PrjPCB` project file) is not yet supported.
+- **Data only** — no visual rendering. Use Altium 365 or Altium Designer to view the schematic graphically.
+- **Tested with Altium Designer v20–v24** — older or newer versions may have undocumented record types.
 
 ## License
 

@@ -5,6 +5,7 @@ Reads .SchDoc files (OLE2 compound documents) and extracts structured
 schematic data: components, pins, nets, ports, hierarchy, and parameters.
 """
 
+import re
 import struct
 from pathlib import Path
 
@@ -112,12 +113,6 @@ def _build_owner_map(records: list[dict]) -> dict[int, list[int]]:
             except ValueError:
                 pass
     return owner_map
-
-
-def _get_children(records, owner_map, record_index):
-    """Get child records for a record at the given index."""
-    ordinal = record_index - 1  # convert to 0-based ordinal (skip header)
-    return [records[i] for i in owner_map.get(ordinal, [])]
 
 
 def _extract_wire_points(record: dict) -> list[tuple[float, float]]:
@@ -251,12 +246,16 @@ def _resolve_nets(records: list[dict], owner_map: dict) -> dict[str, list[str]]:
         for j in range(len(ids) - 1):
             _union(ids[j], ids[j + 1])
 
-    # Connect junctions (they merge overlapping wire endpoints)
+    # Connect junctions to nearby wire endpoints
     for jx, jy in junctions:
         jpt = _quantize(jx, jy)
-        if jpt in point_to_id:
-            jid = point_to_id[jpt]
-            # Junction at this point already connected via wires
+        jid = _get_id(jpt)
+        # Union with any existing wire point at this location
+        for dx in range(-TOLERANCE, TOLERANCE + 1):
+            for dy in range(-TOLERANCE, TOLERANCE + 1):
+                candidate = (jpt[0] + dx, jpt[1] + dy)
+                if candidate in point_to_id and candidate != jpt:
+                    _union(jid, point_to_id[candidate])
 
     # Assign net names from labels and power ports
     # Use tolerance-based snapping for labels/ports/pins to wire endpoints
@@ -474,7 +473,6 @@ def parse_schdoc(file_path: str | Path) -> dict:
 
 def _natural_sort_key(s: str):
     """Sort key for natural ordering: R1, R2, R10 instead of R1, R10, R2."""
-    import re
     parts = re.split(r"(\d+)", s)
     result = []
     for part in parts:

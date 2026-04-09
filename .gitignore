@@ -8,4 +8,7 @@ build/
 .mypy_cache/
 output/
 *.json
+*.txt
 !tests/fixtures/*.json
+!LICENSE
+!README.md

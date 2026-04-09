@@ -33,14 +33,11 @@ def to_markdown(data: dict) -> str:
         lines.append("| Designator | Library Reference | Value | Footprint | Description |")
         lines.append("|------------|-------------------|-------|-----------|-------------|")
         for c in components:
-            desig = c.get("designator", "")
-            libref = c.get("library_reference", "")
-            value = c.get("value", "")
-            fp = c.get("footprint", "")
-            desc = c.get("description", "")
-            # Escape pipe characters in values
-            for field in [desig, libref, value, fp, desc]:
-                field = field.replace("|", "\\|")
+            desig = c.get("designator", "").replace("|", "\\|")
+            libref = c.get("library_reference", "").replace("|", "\\|")
+            value = c.get("value", "").replace("|", "\\|")
+            fp = c.get("footprint", "").replace("|", "\\|")
+            desc = c.get("description", "").replace("|", "\\|").replace("\n", " ")
             lines.append(
                 f"| {desig} | {libref} | {value} | {fp} | {desc} |"
             )
