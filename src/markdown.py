@@ -37,7 +37,7 @@ def to_markdown(data: dict) -> str:
             libref = c.get("library_reference", "").replace("|", "\\|")
             value = c.get("value", "").replace("|", "\\|")
             fp = c.get("footprint", "").replace("|", "\\|")
-            desc = c.get("description", "").replace("|", "\\|").replace("\n", " ")
+            desc = c.get("description", "").replace("|", "\\|").replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
             lines.append(
                 f"| {desig} | {libref} | {value} | {fp} | {desc} |"
             )

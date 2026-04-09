@@ -19,8 +19,7 @@ from src.markdown import to_markdown
 
 mcp = FastMCP(
     "altium-schdoc",
-    version="0.1.0",
-    description="Offline Altium SchDoc parser — extract components, nets, pins, and hierarchy from .SchDoc files without Altium Designer.",
+    instructions="Offline Altium SchDoc parser — extract components, nets, pins, and hierarchy from .SchDoc files without Altium Designer.",
 )
 
 # Cache parsed results keyed by absolute file path
