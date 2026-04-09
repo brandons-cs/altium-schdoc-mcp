@@ -43,6 +43,17 @@ def to_markdown(data: dict) -> str:
             )
         lines.append("")
 
+        # Show multi-part breakdown if any components have parts
+        multipart = [c for c in components if c.get("parts")]
+        if multipart:
+            lines.append("### Multi-Part Components")
+            lines.append("")
+            for c in multipart:
+                desig = c.get("designator", "")
+                for part_desc in c.get("parts", []):
+                    lines.append(f"- **{desig}** — {part_desc}")
+            lines.append("")
+
     # --- Power Ports ---
     power_ports = data.get("power_ports", [])
     if power_ports:
@@ -85,14 +96,24 @@ def to_markdown(data: dict) -> str:
         for c in components_with_pins:
             desig = c.get("designator", "(no desig)")
             libref = c.get("library_reference", "")
+            has_parts = any("part" in pin for pin in c.get("pins", []))
             lines.append(f"### {desig} ({libref})")
             lines.append("")
-            lines.append("| Pin | Name | Electrical Type |")
-            lines.append("|-----|------|-----------------|")
-            for pin in c.get("pins", []):
-                lines.append(
-                    f"| {pin['designator']} | {pin['name']} | {pin['electrical']} |"
-                )
+            if has_parts:
+                lines.append("| Part | Pin | Name | Electrical Type |")
+                lines.append("|------|-----|------|-----------------|")
+                for pin in c.get("pins", []):
+                    part = pin.get("part", "")
+                    lines.append(
+                        f"| {part} | {pin['designator']} | {pin['name']} | {pin['electrical']} |"
+                    )
+            else:
+                lines.append("| Pin | Name | Electrical Type |")
+                lines.append("|-----|------|-----------------|")
+                for pin in c.get("pins", []):
+                    lines.append(
+                        f"| {pin['designator']} | {pin['name']} | {pin['electrical']} |"
+                    )
             lines.append("")
 
     # --- Hierarchy ---

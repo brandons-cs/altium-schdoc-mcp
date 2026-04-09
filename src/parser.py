@@ -146,11 +146,16 @@ def _resolve_nets(records: list[dict], owner_map: dict) -> dict[str, list[str]]:
     wire_segments = []  # [(x1,y1), (x2,y2), ...]
     junctions = []  # (x, y)
 
-    # Build component designator lookup (ordinal -> designator text)
-    comp_designators = {}
+    # Build component designator + part suffix lookup (ordinal -> designator text)
+    comp_designators = {}  # ordinal -> base designator
+    comp_part_info = {}    # ordinal -> (current_part_id, part_count)
     for i, r in enumerate(records):
         if r.get("RECORD") == RECORD_COMPONENT:
             ordinal = i - 1
+            comp_part_info[ordinal] = (
+                int(r.get("CURRENTPARTID", "1")),
+                int(r.get("PARTCOUNT", "1")),
+            )
             for child_idx in owner_map.get(ordinal, []):
                 child = records[child_idx]
                 if child.get("RECORD") == RECORD_DESIGNATOR:
@@ -182,6 +187,11 @@ def _resolve_nets(records: list[dict], owner_map: dict) -> dict[str, list[str]]:
                     owner_ord = int(oi)
                     desig = comp_designators.get(owner_ord, "?")
                     pin_desig = r.get("DESIGNATOR", "")
+                    # Add part suffix for multi-part components (PARTCOUNT > 2)
+                    part_id, part_count = comp_part_info.get(owner_ord, (1, 1))
+                    if part_count > 2:
+                        suffix = _part_id_to_suffix(part_id)
+                        desig = f"{desig}{suffix}"
                     # Pin LOCATION is the body-end. The connection (hot) point
                     # is at LOCATION + PINLENGTH in the direction of rotation.
                     # PINCONGLOMERATE bits 0-1: 0=right, 1=up, 2=left, 3=down
@@ -310,6 +320,104 @@ def _resolve_nets(records: list[dict], owner_map: dict) -> dict[str, list[str]]:
     return dict(sorted(nets.items()))
 
 
+# Regex for detecting power-rail-like port names
+_POWER_NAME_RE = re.compile(
+    r"(^[+-]?\d+\.?\d*\s*V)"   # voltage like 24V, 3.3V, +5V, -12V
+    r"|(\bVDC\b)"               # VDC
+    r"|(\bVAC\b)"               # VAC
+    r"|(\bVCC\b)"               # VCC
+    r"|(\bVDD\b)"               # VDD
+    r"|(\bVSS\b)"               # VSS
+    r"|(\bVEE\b)"               # VEE
+    r"|(\bGND\b)"               # GND
+    r"|(\b0V\b)"                # 0V
+    r"|(^V\+$|^V-$)"           # V+, V-
+    , re.IGNORECASE
+)
+
+
+def _is_power_port_name(name: str) -> bool:
+    """Heuristic: detect if a port name represents a power rail."""
+    return bool(_POWER_NAME_RE.search(name))
+
+
+def _part_id_to_suffix(part_id: int) -> str:
+    """Convert Altium CURRENTPARTID (1-based) to a letter suffix: 1->A, 2->B, etc."""
+    if part_id < 1:
+        return ""
+    return chr(ord("A") + part_id - 1)
+
+
+def _group_multipart_components(raw_components: list[dict]) -> list[dict]:
+    """Group multi-part components by designator.
+    
+    Multi-part components (e.g. relay coil + contacts) share the same designator
+    but have different CURRENTPARTID values. This merges them into a single
+    component entry with combined pins (prefixed with part letter) and a parts list.
+    """
+    from collections import OrderedDict
+
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for comp in raw_components:
+        desig = comp["designator"]
+        groups.setdefault(desig, []).append(comp)
+
+    result = []
+    for desig, parts in groups.items():
+        if len(parts) == 1 or all(p["part_count"] <= 2 for p in parts):
+            # Single-part component or no multi-part — pass through as-is
+            # (PARTCOUNT=2 means 1 real part in Altium: part 0 is hidden)
+            for p in parts:
+                p.pop("current_part_id", None)
+                p.pop("part_count", None)
+            result.extend(parts)
+        else:
+            # Multi-part: merge into one component entry
+            parts.sort(key=lambda p: p["current_part_id"])
+            merged_pins = []
+            part_descriptions = []
+            merged_params = {}
+            footprint = ""
+            value = ""
+            description = ""
+            lib_refs = []
+
+            for p in parts:
+                pid = p["current_part_id"]
+                suffix = _part_id_to_suffix(pid)
+                lib_refs.append(p["library_reference"])
+                part_descriptions.append(f"Part {suffix}: {p['library_reference']}")
+
+                for pin in p["pins"]:
+                    merged_pins.append({
+                        "designator": f"{suffix}.{pin['designator']}",
+                        "name": pin["name"],
+                        "electrical": pin["electrical"],
+                        "part": suffix,
+                    })
+
+                merged_params.update(p.get("parameters", {}))
+                if p["footprint"]:
+                    footprint = p["footprint"]
+                if p["value"]:
+                    value = p["value"]
+                if p["description"]:
+                    description = p["description"]
+
+            result.append({
+                "designator": desig,
+                "library_reference": " / ".join(dict.fromkeys(lib_refs)),
+                "description": description,
+                "footprint": footprint,
+                "value": value,
+                "parameters": merged_params,
+                "pins": sorted(merged_pins, key=lambda p: p["designator"]),
+                "parts": part_descriptions,
+            })
+
+    return result
+
+
 def parse_schdoc(file_path: str | Path) -> dict:
     """Parse an Altium .SchDoc file and return structured data.
     
@@ -342,8 +450,8 @@ def parse_schdoc(file_path: str | Path) -> dict:
             metadata["sheet_style"] = r.get("SHEETSTYLE", "")
             break
 
-    # --- Components ---
-    components = []
+    # --- Components (with multi-part grouping) ---
+    raw_components = []
     for i, r in enumerate(records):
         if r.get("RECORD") != RECORD_COMPONENT:
             continue
@@ -377,7 +485,10 @@ def parse_schdoc(file_path: str | Path) -> dict:
                 if name and text and child.get("ISHIDDEN") != "T":
                     params[name] = text
 
-        components.append({
+        current_part_id = int(r.get("CURRENTPARTID", "1"))
+        part_count = int(r.get("PARTCOUNT", "1"))
+
+        raw_components.append({
             "designator": designator,
             "library_reference": r.get("LIBREFERENCE", ""),
             "description": r.get("COMPONENTDESCRIPTION", ""),
@@ -385,28 +496,40 @@ def parse_schdoc(file_path: str | Path) -> dict:
             "value": params.get("Value", params.get("Comment", "")),
             "parameters": params,
             "pins": sorted(pins, key=lambda p: p["designator"]),
+            "current_part_id": current_part_id,
+            "part_count": part_count,
         })
 
+    # Group multi-part components by designator
+    components = _group_multipart_components(raw_components)
     components.sort(key=lambda c: _natural_sort_key(c["designator"]))
 
     # --- Nets ---
     nets = _resolve_nets(records, owner_map)
 
     # --- Ports (inter-sheet connections) ---
+    # Separate true signal ports from ports that represent power connections
     ports_list = []
+    port_power_list = []  # ports that look like power rails
     for r in records:
         if r.get("RECORD") == RECORD_PORT:
-            ports_list.append({
-                "name": r.get("NAME", ""),
+            name = r.get("NAME", "")
+            port_entry = {
+                "name": name,
                 "io_type": PORT_IO_TYPES.get(r.get("IOTYPE", ""), r.get("IOTYPE", "")),
                 "x": float(r.get("LOCATION.X", "0")),
                 "y": float(r.get("LOCATION.Y", "0")),
-            })
+            }
+            if _is_power_port_name(name):
+                port_power_list.append(port_entry)
+            else:
+                ports_list.append(port_entry)
     ports_list.sort(key=lambda p: p["name"])
 
     # --- Power Ports ---
     power_ports_list = []
     seen_power = set()
+    # First: explicit power port records (type 17)
     for r in records:
         if r.get("RECORD") == RECORD_POWER_PORT:
             text = r.get("TEXT", "")
@@ -416,6 +539,15 @@ def parse_schdoc(file_path: str | Path) -> dict:
                     "name": text,
                     "style": POWER_PORT_STYLES.get(r.get("STYLE", ""), r.get("STYLE", "")),
                 })
+    # Second: port records that represent power rails (detected by name)
+    for p in port_power_list:
+        name = p["name"]
+        if name and name not in seen_power:
+            seen_power.add(name)
+            power_ports_list.append({
+                "name": name,
+                "style": "Port",  # indicate these came from port objects
+            })
     power_ports_list.sort(key=lambda p: p["name"])
 
     # --- Hierarchy (Sheet Symbols + Sheet Entries) ---
