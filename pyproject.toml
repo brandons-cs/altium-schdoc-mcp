@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "altium-schdoc-mcp"
+version = "0.1.0"
+description = "Offline Altium SchDoc parser — CLI + MCP server for AI-assisted hardware review"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Brandon September"}
+]
+keywords = ["altium", "schdoc", "schematic", "mcp", "eda", "electronics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "olefile>=0.46",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp[cli]>=1.0.0"]
+
+[project.scripts]
+parse-schdoc = "src.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
